@@ -1,49 +1,41 @@
 import express from "express";
+import cors from "cors";
 import mqtt from "mqtt";
 import dotenv from "dotenv";
-import cors from "cors";
-
 dotenv.config();
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// --- Connessione MQTT ---
-const options = {
-  host: process.env.MQTT_HOST,
-  port: process.env.MQTT_PORT,
-  protocol: "mqtts",
+const client = mqtt.connect(process.env.MQTT_HOST, {
+  port: parseInt(process.env.MQTT_PORT),
   username: process.env.MQTT_USER,
-  password: process.env.MQTT_PASS
-};
-
-const client = mqtt.connect(options);
-
-client.on("connect", () => {
-  console.log("✅ Connesso a HiveMQ Cloud via MQTT");
+  password: process.env.MQTT_PASS,
+  rejectUnauthorized: false
 });
 
-// --- API per inviare comando ---
-app.post("/send-command", (req, res) => {
-  const { command } = req.body; // es. { "command": "ON" }
+client.on("connect", () => console.log("✅ Connesso a HiveMQ Cloud via MQTT"));
 
-  if (!command) {
-    return res.status(400).json({ error: "Manca il comando" });
+const VALID_CODE = "12345"; // 🔹 per test, poi generabile dinamico
+
+// verifica codice
+app.post("/verify-code", (req, res) => {
+  const { userCode } = req.body;
+  if (userCode === VALID_CODE) {
+    res.json({ success: true });
+  } else {
+    res.json({ success: false });
   }
+});
 
+// invio comando relè
+app.post("/send-command", (req, res) => {
+  const { command } = req.body;
   client.publish(process.env.MQTT_TOPIC, command, (err) => {
-    if (err) {
-      console.error("Errore MQTT:", err);
-      return res.status(500).json({ error: "Errore pubblicazione MQTT" });
-    }
-    console.log(`➡️ Inviato comando MQTT: ${command}`);
+    if (err) return res.status(500).json({ error: "Errore MQTT" });
     res.json({ success: true, command });
   });
 });
 
-// --- Avvio server ---
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Backend in ascolto su http://localhost:${PORT}`);
-});
+app.listen(process.env.PORT || 3000, () => console.log("Server avviato"));
