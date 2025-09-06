@@ -33,28 +33,39 @@ client.on("error", (err) => {
   console.error("❌ Errore MQTT:", err);
 });
 
-// --- Endpoint per verifica codice ---
+// Helper: valida codice
+function isValidCode(code) {
+  return code === "12345"; // TODO: sostituire con logica reale in futuro
+}
+
+// ✅ SOLO verifica: NON pubblica su MQTT
 app.post("/verify-code", (req, res) => {
-  const { userCode } = req.body;
+  const { userCode } = req.body || {};
+  if (!userCode) return res.status(400).json({ success: false, error: "Codice mancante" });
+  return res.json({ success: isValidCode(userCode) });
+});
 
-  if (!userCode) {
-    return res.status(400).json({ success: false, error: "Codice mancante" });
+// ✅ Invio comando: pubblica su MQTT SOLO se il codice è valido
+app.post("/send-command", (req, res) => {
+  const { userCode, command } = req.body || {};
+  if (!userCode || !command) {
+    return res.status(400).json({ success: false, error: "Parametri mancanti" });
   }
-
-  // Esempio semplice: accetta solo "12345"
-  if (userCode === "12345") {
-    client.publish("relay_1", "ON", {}, (err) => {
-      if (err) {
-        console.error("Errore pubblicazione MQTT:", err);
-        return res.status(500).json({ success: false, error: "MQTT publish failed" });
-      }
-      console.log("➡️  Comando ON inviato al topic relay_1");
-      return res.json({ success: true, command: "ON" });
-    });
-  } else {
+  if (!isValidCode(userCode)) {
     return res.status(401).json({ success: false, error: "Codice non valido" });
   }
+
+  const topic = process.env.MQTT_TOPIC || "relay_1";
+  client.publish(topic, command, {}, (err) => {
+    if (err) {
+      console.error("Errore pubblicazione MQTT:", err);
+      return res.status(500).json({ success: false, error: "MQTT publish failed" });
+    }
+    console.log(`➡️  Comando '${command}' inviato al topic ${topic}`);
+    return res.json({ success: true, command });
+  });
 });
+
 
 // --- Avvio server ---
 const PORT = process.env.PORT || 10000;
