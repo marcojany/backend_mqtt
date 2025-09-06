@@ -33,37 +33,58 @@ client.on("error", (err) => {
   console.error("❌ Errore MQTT:", err);
 });
 
-// Helper: valida codice
-function isValidCode(code) {
-  return code === "12345"; // TODO: sostituire con logica reale in futuro
-}
+// --- Archivio codici in memoria ---
+let codes = {}; // { "12345": { user: "Marco", expiry: 1699999999999 } }
 
-// ✅ SOLO verifica: NON pubblica su MQTT
-app.post("/verify-code", (req, res) => {
-  const { userCode } = req.body || {};
-  if (!userCode) return res.status(400).json({ success: false, error: "Codice mancante" });
-  return res.json({ success: isValidCode(userCode) });
+// --- Endpoint admin: genera codice ---
+app.post("/admin/generate-code", (req, res) => {
+  const { user, code, duration } = req.body;
+  if (!user || !code || !duration) {
+    return res.status(400).json({ success: false, error: "Dati mancanti" });
+  }
+  const expiry = Date.now() + duration * 1000; // durata in secondi
+  codes[code] = { user, expiry };
+  console.log(`🔑 Codice ${code} generato per ${user}, valido fino a ${new Date(expiry)}`);
+  res.json({ success: true, code, expiry });
 });
 
-// ✅ Invio comando: pubblica su MQTT SOLO se il codice è valido
-app.post("/send-command", (req, res) => {
-  const { userCode, command } = req.body || {};
-  if (!userCode || !command) {
-    return res.status(400).json({ success: false, error: "Parametri mancanti" });
+// --- Endpoint utente: verifica codice ---
+app.post("/verify-code", (req, res) => {
+  const { userCode } = req.body;
+  const entry = codes[userCode];
+  if (entry && entry.expiry > Date.now()) {
+    res.json({ success: true, user: entry.user });
+  } else {
+    res.json({ success: false });
   }
-  if (!isValidCode(userCode)) {
-    return res.status(401).json({ success: false, error: "Codice non valido" });
-  }
+});
 
-  const topic = process.env.MQTT_TOPIC || "relay_1";
-  client.publish(topic, command, {}, (err) => {
-    if (err) {
-      console.error("Errore pubblicazione MQTT:", err);
-      return res.status(500).json({ success: false, error: "MQTT publish failed" });
-    }
-    console.log(`➡️  Comando '${command}' inviato al topic ${topic}`);
-    return res.json({ success: true, command });
-  });
+// --- Endpoint utente: invio comando ---
+app.post("/send-command", (req, res) => {
+  const { userCode, command } = req.body;
+  const entry = codes[userCode];
+  if (entry && entry.expiry > Date.now()) {
+    client.publish("relay_1", command, { qos: 1 }, (err) => {
+      if (err) {
+        console.error("Errore invio comando:", err);
+        return res.status(500).json({ success: false });
+      }
+      console.log(`⚡ Comando ${command} inviato da ${entry.user}`);
+      res.json({ success: true, command, user: entry.user });
+    });
+  } else {
+    res.json({ success: false, error: "Codice non valido o scaduto" });
+  }
+});
+
+// --- Endpoint admin: lista codici attivi ---
+app.get("/admin/list-codes", (req, res) => {
+  const active = Object.entries(codes).map(([code, data]) => ({
+    code,
+    user: data.user,
+    expiry: data.expiry
+  }));
+  res.json({ success: true, active });
 });
 
 
