@@ -79,13 +79,30 @@ app.post("/send-command", (req, res) => {
 
 // --- Endpoint admin: lista codici attivi ---
 app.get("/admin/list-codes", (req, res) => {
-  const active = Object.entries(codes).map(([code, data]) => ({
+  const now = Date.now();
+  const activeCodes = Object.entries(codes).map(([code, data]) => ({
     code,
     user: data.user,
-    expiry: data.expiry
+    expiry: data.expiry,
+    expiresInSeconds: Math.max(0, Math.floor((data.expiry - now) / 1000))
   }));
-  res.json({ success: true, active });
+
+  res.json({ activeCodes });
 });
+
+// --- Endpoint admin: elimina un codice ---
+app.delete("/admin/delete-code/:code", (req, res) => {
+  const code = req.params.code;
+
+  if (codes[code]) {
+    delete codes[code];
+    console.log(`❌ Codice ${code} annullato manualmente dall'admin`);
+    res.json({ success: true, message: `Codice ${code} eliminato` });
+  } else {
+    res.status(404).json({ success: false, error: "Codice non trovato" });
+  }
+});
+
 
 
 // --- Avvio server ---
