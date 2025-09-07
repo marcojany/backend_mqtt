@@ -33,8 +33,9 @@ client.on("error", (err) => {
   console.error("❌ Errore MQTT:", err);
 });
 
-// --- Archivio codici in memoria ---
+// --- Archivio dei codici e del loro utilizzo ---
 let codes = {}; // { "12345": { user: "Marco", expiry: 1699999999999 } }
+let logs = []; // ogni voce sarà { user, code, timestamp, action }
 
 // --- Endpoint admin: genera codice ---
 app.post("/admin/generate-code", (req, res) => {
@@ -74,9 +75,17 @@ app.post("/verify-code", (req, res) => {
   const now = Date.now();
 
   if (codeInfo.expiry < now) {
-    delete codes[userCode]; // pulizia automatica
+    delete codes[userCode]; 
     return res.status(401).json({ success: false, error: "Codice scaduto" });
   }
+
+  // 🔹 Aggiungi al log
+  logs.push({
+    user: codeInfo.user,
+    code: userCode,
+    timestamp: new Date().toISOString(),
+    action: "verify"
+  });
 
   console.log(`✅ Codice ${userCode} accettato per utente ${codeInfo.user}`);
 
@@ -88,6 +97,10 @@ app.post("/verify-code", (req, res) => {
   });
 });
 
+// --- E>ndpoint admin: Lista log ---
+app.get("/admin/logs", (req, res) => {
+  res.json({ success: true, logs });
+});
 
 // --- Endpoint utente: invio comando ---
 app.post("/send-command", (req, res) => {
