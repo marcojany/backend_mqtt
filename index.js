@@ -38,14 +38,28 @@ let codes = {}; // { "12345": { user: "Marco", expiry: 1699999999999 } }
 
 // --- Endpoint admin: genera codice ---
 app.post("/admin/generate-code", (req, res) => {
-  const { user, code, duration } = req.body;
-  if (!user || !code || !duration) {
-    return res.status(400).json({ success: false, error: "Dati mancanti" });
+  const { user, duration } = req.body;
+
+  if (!user || !duration) {
+    return res.status(400).json({ success: false, error: "Parametri mancanti" });
   }
-  const expiry = Date.now() + duration * 1000; // durata in secondi
+
+  // Codice numerico a 5 cifre
+  const code = Math.floor(10000 + Math.random() * 90000).toString();
+
+  // Calcolo scadenza (durata in minuti -> ms)
+  const expiry = Date.now() + duration * 60 * 1000;
+
   codes[code] = { user, expiry };
-  console.log(`🔑 Codice ${code} generato per ${user}, valido fino a ${new Date(expiry)}`);
-  res.json({ success: true, code, expiry });
+
+  console.log(`✅ Codice ${code} generato per ${user}, valido ${duration} min`);
+
+  res.json({
+    success: true,
+    code,
+    user,
+    expiry
+  });
 });
 
 // --- Endpoint utente: verifica codice ---
@@ -80,14 +94,16 @@ app.post("/send-command", (req, res) => {
 // --- Endpoint admin: lista codici attivi ---
 app.get("/admin/list-codes", (req, res) => {
   const now = Date.now();
-  const activeCodes = Object.entries(codes).map(([code, data]) => ({
-    code,
-    user: data.user,
-    expiry: data.expiry,
-    expiresInSeconds: Math.max(0, Math.floor((data.expiry - now) / 1000))
-  }));
+  const activeCodes = Object.entries(codes)
+    .filter(([code, info]) => info.expiry > now)
+    .map(([code, info]) => ({
+      code,
+      user: info.user,
+      expiry: info.expiry,
+      expiresInSeconds: Math.floor((info.expiry - now) / 1000)
+    }));
 
-  res.json({ activeCodes });
+  res.json({ success: true, activeCodes });
 });
 
 // --- Endpoint admin: elimina un codice ---
