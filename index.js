@@ -65,13 +65,29 @@ app.post("/admin/generate-code", (req, res) => {
 // --- Endpoint utente: verifica codice ---
 app.post("/verify-code", (req, res) => {
   const { userCode } = req.body;
-  const entry = codes[userCode];
-  if (entry && entry.expiry > Date.now()) {
-    res.json({ success: true, user: entry.user });
-  } else {
-    res.json({ success: false });
+
+  if (!userCode || !codes[userCode]) {
+    return res.status(401).json({ success: false, error: "Codice non valido" });
   }
+
+  const codeInfo = codes[userCode];
+  const now = Date.now();
+
+  if (codeInfo.expiry < now) {
+    delete codes[userCode]; // pulizia automatica
+    return res.status(401).json({ success: false, error: "Codice scaduto" });
+  }
+
+  console.log(`✅ Codice ${userCode} accettato per utente ${codeInfo.user}`);
+
+  res.json({
+    success: true,
+    user: codeInfo.user,
+    code: userCode,
+    expiresInSeconds: Math.floor((codeInfo.expiry - now) / 1000)
+  });
 });
+
 
 // --- Endpoint utente: invio comando ---
 app.post("/send-command", (req, res) => {
