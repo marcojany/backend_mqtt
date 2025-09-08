@@ -83,13 +83,8 @@ app.post("/send-command", (req, res) => {
 app.post("/admin/create-code", (req, res) => {
   const { user, expiryDate } = req.body;
 
-  // Suddivide la stringa "YYYY-MM-DDTHH:mm"
-  const [datePart, timePart] = expiryDate.split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute] = timePart.split(":").map(Number);
-
-  // Usa costruttore locale: NON converte in UTC
-  const expiry = new Date(year, month - 1, day, hour, minute).getTime();
+  // Costruisci data direttamente dal valore del calendario
+  const expiry = new Date(expiryDate).getTime();
 
   if (isNaN(expiry)) {
     return res.status(400).json({ success: false, error: "Data non valida" });
