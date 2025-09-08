@@ -2,6 +2,7 @@
 import express from "express";
 import cors from "cors";
 import mqtt from "mqtt";
+import { zonedTimeToUtc } from "date-fns-tz";
 //import dotenv from "dotenv"; //per uso locale utilizza il file .env
 import bodyParser from "body-parser";
 //dotenv.config();
@@ -83,8 +84,8 @@ app.post("/send-command", (req, res) => {
 app.post("/admin/create-code", (req, res) => {
   const { user, expiryDate } = req.body;
 
-  // Costruisci data direttamente dal valore del calendario
-  const expiry = new Date(expiryDate).getTime();
+  // Converte la data locale italiana in UTC
+  const expiry = zonedTimeToUtc(expiryDate, "Europe/Rome").getTime();
 
   if (isNaN(expiry)) {
     return res.status(400).json({ success: false, error: "Data non valida" });
@@ -105,7 +106,7 @@ app.post("/admin/create-code", (req, res) => {
     success: true,
     code,
     user,
-    expiry // invio il timestamp "pulito"
+    expiry // invio il timestamp "pulito" (UTC)
   });
 });
 
