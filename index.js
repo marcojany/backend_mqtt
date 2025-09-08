@@ -83,24 +83,37 @@ app.post("/send-command", (req, res) => {
 app.post("/admin/create-code", (req, res) => {
   const { user, expiryDate } = req.body;
 
-  // Costruisci la data manualmente da "YYYY-MM-DDTHH:mm"
+  // Suddivide la stringa "YYYY-MM-DDTHH:mm"
   const [datePart, timePart] = expiryDate.split("T");
   const [year, month, day] = datePart.split("-").map(Number);
   const [hour, minute] = timePart.split(":").map(Number);
 
-  // ATTENZIONE: new Date(year, monthIndex, day, hour, minute) usa il fuso locale
+  // Usa costruttore locale: NON converte in UTC
   const expiry = new Date(year, month - 1, day, hour, minute).getTime();
 
-  if (isNaN(expiry)) return res.status(400).json({ success: false, error: "Data non valida" });
+  if (isNaN(expiry)) {
+    return res.status(400).json({ success: false, error: "Data non valida" });
+  }
 
+  // Genera codice casuale a 5 cifre
   const code = Math.floor(10000 + Math.random() * 90000).toString();
   const secondsRemaining = Math.floor((expiry - Date.now()) / 1000);
 
+  // Salva il codice in memoria
   codes[code] = { user, expiry, expiresInSeconds: secondsRemaining };
+
+  // Log dell’azione
   logAction({ user, code, action: "CREATED" });
 
-  res.json({ success: true, code, user, expiry });
+  // Risposta
+  res.json({
+    success: true,
+    code,
+    user,
+    expiry // invio il timestamp "pulito"
+  });
 });
+
 
 // --- Endpoint admin: lista codici ---
 app.get("/admin/list-codes", (req, res) => {
