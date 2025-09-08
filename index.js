@@ -37,87 +37,74 @@ client.on("error", (err) => {
 let codes = {}; // { "12345": { user: "Marco", expiry: 1699999999999 } }
 let logs = []; // ogni voce sarà { user, code, timestamp, action }
 
-// --- Endpoint admin: genera codice ---
-app.post("/admin/generate-code", (req, res) => {
-  const { user, duration } = req.body;
+// --- Endpoint admin: genera codice con scadenza ---
+app.post("/admin/create-code", (req, res) => {
+  const { user, expiryDate } = req.body;
 
-  if (!user || !duration) {
-    return res.status(400).json({ success: false, error: "Parametri mancanti" });
+  if (!user || !expiryDate) {
+    return res.status(400).json({ success: false, error: "User e expiryDate richiesti" });
   }
 
-  // Codice numerico a 5 cifre
-  const code = Math.floor(10000 + Math.random() * 90000).toString();
+  const code = Math.floor(10000 + Math.random() * 90000).toString(); // 5 cifre
+  codes[code] = { user, expiry: new Date(expiryDate).getTime() };
 
-  // Calcolo scadenza (durata in minuti -> ms)
-  const expiry = Date.now() + duration * 60 * 1000;
+  logs.push({ user, code, action: "CREATED", timestamp: new Date() });
 
-  codes[code] = { user, expiry };
-
-  console.log(`✅ Codice ${code} generato per ${user}, valido ${duration} min`);
-
-  res.json({
-    success: true,
-    code,
-    user,
-    expiry
-  });
+  res.json({ success: true, code, user, expiry: expiryDate });
 });
+
 
 // --- Endpoint utente: verifica codice ---
 app.post("/verify-code", (req, res) => {
   const { userCode } = req.body;
+  const entry = codes[userCode];
 
-  if (!userCode || !codes[userCode]) {
+  if (!entry) {
     return res.status(401).json({ success: false, error: "Codice non valido" });
   }
 
-  const codeInfo = codes[userCode];
   const now = Date.now();
-
-  if (codeInfo.expiry < now) {
-    delete codes[userCode]; 
+  if (now > entry.expiry) {
+    delete codes[userCode];
+    logs.push({ user: entry.user, code: userCode, action: "EXPIRED", timestamp: new Date() });
     return res.status(401).json({ success: false, error: "Codice scaduto" });
   }
 
-  // 🔹 Aggiungi al log
-  logs.push({
-    user: codeInfo.user,
-    code: userCode,
-    timestamp: new Date().toISOString(),
-    action: "verify"
-  });
+  logs.push({ user: entry.user, code: userCode, action: "VERIFIED", timestamp: new Date() });
+  res.json({ success: true, user: entry.user });
+});
 
-  console.log(`✅ Codice ${userCode} accettato per utente ${codeInfo.user}`);
+// --- Endpoint: invio comando MQTT ---
+app.post("/send-command", (req, res) => {
+  const { userCode, command } = req.body;
+  const entry = codes[userCode];
 
-  res.json({
-    success: true,
-    user: codeInfo.user,
-    code: userCode,
-    expiresInSeconds: Math.floor((codeInfo.expiry - now) / 1000)
+  if (!entry) {
+    return res.status(401).json({ success: false, error: "Codice non valido" });
+  }
+
+  const now = Date.now();
+  if (now > entry.expiry) {
+    delete codes[userCode];
+    logs.push({ user: entry.user, code: userCode, action: "EXPIRED", timestamp: new Date() });
+    return res.status(401).json({ success: false, error: "Codice scaduto" });
+  }
+
+  client.publish("relay_1", command || "ON", { qos: 1 }, (err) => {
+    if (err) {
+      console.error("Errore invio comando:", err);
+      return res.status(500).json({ success: false });
+    }
+
+    logs.push({ user: entry.user, code: userCode, action: "ACTIVATED", timestamp: new Date() });
+    console.log(`⚡ Comando ${command || "ON"} inviato da ${entry.user}`);
+    res.json({ success: true, command: command || "ON", user: entry.user });
   });
 });
 
 // --- E>ndpoint admin: Lista log ---
 app.get("/admin/logs", (req, res) => {
   res.json({ success: true, logs });
-});
-
-// --- Endpoint utente: invio comando ---
-app.post("/send-command", (req, res) => {
-  const { userCode, command } = req.body;
-  const entry = codes[userCode];
-  if (entry && entry.expiry > Date.now()) {
-    client.publish("relay_1", command, { qos: 1 }, (err) => {
-      if (err) {
-        console.error("Errore invio comando:", err);
-        return res.status(500).json({ success: false });
-      }
-      console.log(`⚡ Comando ${command} inviato da ${entry.user}`);
-      res.json({ success: true, command, user: entry.user });
-    });
-  } else {
-    res.json({ success: false, error: "Codice non valido o scaduto" });
-  }
 });
 
 // --- Endpoint admin: lista codici attivi ---
