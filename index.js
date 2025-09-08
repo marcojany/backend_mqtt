@@ -2,7 +2,7 @@
 import express from "express";
 import cors from "cors";
 import mqtt from "mqtt";
-import { zonedTimeToUtc } from "date-fns-tz";
+import { DateTime } from 'luxon';
 //import dotenv from "dotenv"; //per uso locale utilizza il file .env
 import bodyParser from "body-parser";
 //dotenv.config();
@@ -82,11 +82,11 @@ app.post("/send-command", (req, res) => {
 
 // --- Endpoint admin: crea codice ---
 app.post("/admin/create-code", (req, res) => {
-  const { user, expiryDate } = req.body; // expiryDate dal calendario HTML, tipo "2025-09-08T20:39"
+  const { user, expiryDate } = req.body; // dal calendario HTML, es. "2025-09-08T20:39"
 
   try {
     // Interpreta la data come fuso Europe/Rome e convertila in UTC
-    const expiryUtc = zonedTimeToUtc(expiryDate, 'Europe/Rome').getTime();
+    const expiryUtc = DateTime.fromISO(expiryDate, { zone: 'Europe/Rome' }).toUTC().toMillis();
 
     if (isNaN(expiryUtc)) {
       return res.status(400).json({ success: false, error: "Data non valida" });
@@ -102,7 +102,6 @@ app.post("/admin/create-code", (req, res) => {
     // Log dell’azione
     logAction({ user, code, action: "CREATED" });
 
-    // Risposta (invia solo timestamp pulito)
     res.json({
       success: true,
       code,
