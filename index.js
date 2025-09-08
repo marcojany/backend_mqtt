@@ -82,32 +82,37 @@ app.post("/send-command", (req, res) => {
 
 // --- Endpoint admin: crea codice ---
 app.post("/admin/create-code", (req, res) => {
-  const { user, expiryDate } = req.body;
+  const { user, expiryDate } = req.body; // expiryDate dal calendario HTML, tipo "2025-09-08T20:39"
 
-  // Converte la data locale italiana in UTC
-  const expiry = zonedTimeToUtc(expiryDate, "Europe/Rome").getTime();
+  try {
+    // Interpreta la data come fuso Europe/Rome e convertila in UTC
+    const expiryUtc = zonedTimeToUtc(expiryDate, 'Europe/Rome').getTime();
 
-  if (isNaN(expiry)) {
-    return res.status(400).json({ success: false, error: "Data non valida" });
+    if (isNaN(expiryUtc)) {
+      return res.status(400).json({ success: false, error: "Data non valida" });
+    }
+
+    // Genera codice casuale a 5 cifre
+    const code = Math.floor(10000 + Math.random() * 90000).toString();
+    const secondsRemaining = Math.floor((expiryUtc - Date.now()) / 1000);
+
+    // Salva il codice in memoria
+    codes[code] = { user, expiry: expiryUtc, expiresInSeconds: secondsRemaining };
+
+    // Log dell’azione
+    logAction({ user, code, action: "CREATED" });
+
+    // Risposta (invia solo timestamp pulito)
+    res.json({
+      success: true,
+      code,
+      user,
+      expiry: expiryUtc
+    });
+
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Errore interno" });
   }
-
-  // Genera codice casuale a 5 cifre
-  const code = Math.floor(10000 + Math.random() * 90000).toString();
-  const secondsRemaining = Math.floor((expiry - Date.now()) / 1000);
-
-  // Salva il codice in memoria
-  codes[code] = { user, expiry, expiresInSeconds: secondsRemaining };
-
-  // Log dell’azione
-  logAction({ user, code, action: "CREATED" });
-
-  // Risposta
-  res.json({
-    success: true,
-    code,
-    user,
-    expiry // invio il timestamp "pulito" (UTC)
-  });
 });
 
 
