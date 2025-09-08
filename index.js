@@ -82,7 +82,7 @@ app.post("/send-command", (req, res) => {
 // --- Endpoint admin: crea codice ---
 app.post("/admin/create-code", (req, res) => {
   const { user, expiryDate } = req.body;
-  const expiry = new Date(expiryDate).getTime();
+  const expiry = new Date(expiryDate+ ":00Z").getTime();
   if (isNaN(expiry)) return res.status(400).json({ success: false, error: "Data non valida" });
 
   const code = Math.floor(10000 + Math.random() * 90000).toString(); // 5 cifre
