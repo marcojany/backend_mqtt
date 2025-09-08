@@ -82,16 +82,24 @@ app.post("/send-command", (req, res) => {
 // --- Endpoint admin: crea codice ---
 app.post("/admin/create-code", (req, res) => {
   const { user, expiryDate } = req.body;
-  const expiry = new Date(expiryDate).getTime();
+
+  // Costruisci la data manualmente da "YYYY-MM-DDTHH:mm"
+  const [datePart, timePart] = expiryDate.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+
+  // ATTENZIONE: new Date(year, monthIndex, day, hour, minute) usa il fuso locale
+  const expiry = new Date(year, month - 1, day, hour, minute).getTime();
+
   if (isNaN(expiry)) return res.status(400).json({ success: false, error: "Data non valida" });
 
-  const code = Math.floor(10000 + Math.random() * 90000).toString(); // 5 cifre
+  const code = Math.floor(10000 + Math.random() * 90000).toString();
   const secondsRemaining = Math.floor((expiry - Date.now()) / 1000);
 
   codes[code] = { user, expiry, expiresInSeconds: secondsRemaining };
   logAction({ user, code, action: "CREATED" });
 
-res.json({ success: true, code, user, expiry });
+  res.json({ success: true, code, user, expiry });
 });
 
 // --- Endpoint admin: lista codici ---
