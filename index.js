@@ -45,16 +45,23 @@ function logAction({ user, code, action }) {
 app.post("/verify-code", (req, res) => {
   const { userCode } = req.body;
   const entry = codes[userCode];
+  const now = Date.now();
 
-if (now < entry.start) {
-  return res.json({ success: false, error: "Codice non ancora valido" });
-}
+  if (!entry) {
+    logAction({ user: "-", code: userCode, action: "INVALID" });
+    return res.json({ success: false, error: "Codice non valido" });
+  }
 
-if (entry.expiry <= now) {
-  logAction({ user: entry.user, code: userCode, action: "EXPIRED" });
-  delete codes[userCode];
-  return res.json({ success: false, error: "Codice scaduto" });
-}
+  if (now < entry.start) {
+    logAction({ user: entry.user, code: userCode, action: "TOO_EARLY" });
+    return res.json({ success: false, error: "Codice non ancora valido" });
+  }
+
+  if (now > entry.expiry) {
+    logAction({ user: entry.user, code: userCode, action: "EXPIRED" });
+    delete codes[userCode];
+    return res.json({ success: false, error: "Codice scaduto" });
+  }
 
   logAction({ user: entry.user, code: userCode, action: "VERIFIED" });
   res.json({ success: true, user: entry.user });
@@ -64,8 +71,9 @@ if (entry.expiry <= now) {
 app.post("/send-command", (req, res) => {
   const { userCode, command } = req.body;
   const entry = codes[userCode];
+  const now = Date.now();
 
-  if (!entry || entry.expiry <= Date.now()) {
+  if (!entry || now < entry.start || now > entry.expiry) {
     return res.status(400).json({ success: false, error: "Codice non valido o scaduto" });
   }
 
@@ -81,31 +89,46 @@ app.post("/send-command", (req, res) => {
 
 // --- Endpoint admin: crea codice ---
 app.post("/admin/create-code", (req, res) => {
-  const { user, startDate, expiryDate } = req.body;
+  const { user, startDate, expiryDate } = req.body; // ora riceviamo anche startDate
 
-  const start = DateTime.fromISO(startDate, { zone: "Europe/Rome" }).toUTC().toMillis();
-  const expiry = DateTime.fromISO(expiryDate, { zone: "Europe/Rome" }).toUTC().toMillis();
+  try {
+    const startUtc = DateTime.fromISO(startDate, { zone: 'Europe/Rome' }).toUTC().toMillis();
+    const expiryUtc = DateTime.fromISO(expiryDate, { zone: 'Europe/Rome' }).toUTC().toMillis();
 
-  if (isNaN(start) || isNaN(expiry) || start >= expiry) {
-    return res.status(400).json({ success: false, error: "Intervallo non valido" });
+    if (isNaN(startUtc) || isNaN(expiryUtc)) {
+      return res.status(400).json({ success: false, error: "Date non valide" });
+    }
+
+    if (expiryUtc <= startUtc) {
+      return res.status(400).json({ success: false, error: "La data di fine deve essere successiva a quella di inizio" });
+    }
+
+    const code = Math.floor(10000 + Math.random() * 90000).toString();
+    const secondsRemaining = Math.floor((expiryUtc - Date.now()) / 1000);
+
+    codes[code] = { user, start: startUtc, expiry: expiryUtc, expiresInSeconds: secondsRemaining };
+
+    logAction({ user, code, action: "CREATED" });
+
+    res.json({
+      success: true,
+      code,
+      user,
+      start: startUtc,
+      expiry: expiryUtc
+    });
+
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Errore interno" });
   }
-
-  const code = Math.floor(10000 + Math.random() * 90000).toString();
-  const secondsRemaining = Math.floor((expiry - Date.now()) / 1000);
-
-  codes[code] = { user, start, expiry, expiresInSeconds: secondsRemaining };
-
-  logAction({ user, code, action: "CREATED" });
-
-  res.json({ success: true, code, user, start, expiry });
 });
-
 
 // --- Endpoint admin: lista codici ---
 app.get("/admin/list-codes", (req, res) => {
   const activeCodes = Object.entries(codes).map(([code, entry]) => {
-    const expiresInSeconds = Math.floor((entry.expiry - Date.now()) / 1000);
-    return { code, user: entry.user, expiry: entry.expiry, expiresInSeconds };
+    const now = Date.now();
+    const expiresInSeconds = Math.floor((entry.expiry - now) / 1000);
+    return { code, user: entry.user, start: entry.start, expiry: entry.expiry, expiresInSeconds };
   });
   res.json({ activeCodes });
 });
@@ -127,7 +150,7 @@ app.get("/admin/logs", (req, res) => {
   res.json({ logs });
 });
 
-// --- Controllo automatico codici scaduti ogni minuto ---
+// --- Controllo automatico codici scaduti ---
 setInterval(() => {
   const now = Date.now();
   Object.entries(codes).forEach(([code, entry]) => {
@@ -139,7 +162,7 @@ setInterval(() => {
       entry.expiresInSeconds = Math.floor((entry.expiry - now) / 1000);
     }
   });
-}, 60 * 1000); // ogni 60 secondi
+}, 60 * 1000);
 
 // --- Avvio server ---
 const PORT = process.env.PORT || 3000;
