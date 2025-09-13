@@ -164,6 +164,11 @@ setInterval(() => {
   });
 }, 60 * 1000);
 
+// --- Endpoint ping di risveglio ---
+app.get("/ping", (req, res) => {
+  res.json({ success: true, message: "Backend attivo" });
+});
+
 // --- Avvio server ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server avviato su http://localhost:${PORT}`));
