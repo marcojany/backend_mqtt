@@ -86,14 +86,26 @@ app.post("/send-command", (req, res) => {
       on: true
     }
   });
-  client.publish("shelly-ingresso/rpc", shellyPayload, { qos: 1 }, (err) => {
-    if (err) {
-      console.error("Errore invio comando:", err);
-      return res.status(500).json({ success: false });
-    }
-    logAction({ user: entry.user, code: userCode, action: "ACTIVATED" });
-    res.json({ success: true, command, user: entry.user });
-  });
+  try {
+    client.publish("shelly-ingresso/rpc", shellyPayload, { qos: 1 }, (err) => {
+      if (err) {
+        console.error("Errore invio comando a Shelly:", err);
+        return res.status(500).json({ success: false, error: "MQTT publish failed" });
+      }
+
+      logAction({ user: entry.user, code: userCode, action: "ACTIVATED" });
+
+      // 🔥 Risposta chiara e coerente per il frontend
+      return res.json({
+        success: true,
+        message: "Relè attivato",
+        user: entry.user
+      });
+    });
+  } catch (e) {
+    console.error("Eccezione durante publish:", e);
+    return res.status(500).json({ success: false, error: "Errore interno server" });
+  }
 });
 
 // --- Endpoint admin: crea codice ---
