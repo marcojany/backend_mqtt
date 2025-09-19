@@ -77,7 +77,7 @@ app.post("/send-command", (req, res) => {
     return res.status(400).json({ success: false, error: "Codice non valido o scaduto" });
   }
 
-  client.publish("relay_1", command, { qos: 1 }, (err) => {
+  client.publish("shelly-ingresso/rpc", command, { qos: 1 }, (err) => { //todo topic da configurare
     if (err) {
       console.error("Errore invio comando:", err);
       return res.status(500).json({ success: false });
