@@ -86,7 +86,7 @@ app.post("/send-command", (req, res) => {
       on: true
     }
   });
-  client.publish("relay_1", shellyPayload, { qos: 1 }, (err) => {
+  client.publish("shelly-ingresso/rpc", shellyPayload, { qos: 1 }, (err) => {
     if (err) {
       console.error("Errore invio comando:", err);
       return res.status(500).json({ success: false });
