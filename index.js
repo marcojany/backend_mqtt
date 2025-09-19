@@ -69,15 +69,24 @@ app.post("/verify-code", (req, res) => {
 
 // --- Endpoint utente: invio comando al relè ---
 app.post("/send-command", (req, res) => {
-  const { userCode, command } = req.body;
+  const { userCode } = req.body;
   const entry = codes[userCode];
   const now = Date.now();
 
   if (!entry || now < entry.start || now > entry.expiry) {
     return res.status(400).json({ success: false, error: "Codice non valido o scaduto" });
   }
-
-  client.publish("shelly-ingresso/rpc", command, { qos: 1 }, (err) => { //todo topic da configurare
+    // 🔑 Payload richiesto da Shelly
+  const shellyPayload = JSON.stringify({
+    id: 1,
+    src: "webclient",
+    method: "Switch.Set",
+    params: {
+      id: 0,
+      on: true
+    }
+  });
+  client.publish("relay_1", shellyPayload, { qos: 1 }, (err) => {
     if (err) {
       console.error("Errore invio comando:", err);
       return res.status(500).json({ success: false });
