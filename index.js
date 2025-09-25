@@ -77,11 +77,7 @@ app.post("/send-command", (req, res) => {
     return res.status(400).json({ success: false, error: "Codice non valido o scaduto" });
   }
 
-  // Scegli il topic giusto
-  const topic =
-    relayId === 2
-      ? process.env.MQTT_TOPIC_RELAY2
-      : process.env.MQTT_TOPIC_RELAY1;
+  
 
   // 🔑 Payload richiesto da Shelly
   const shellyPayload = JSON.stringify({
@@ -94,20 +90,26 @@ app.post("/send-command", (req, res) => {
     }
   });
 
-  client.publish(topic, shellyPayload, { qos: 1 }, (err) => {
-    if (err) {
-      console.error("Errore invio comando a Shelly:", err);
-      return res.status(500).json({ success: false, error: "MQTT publish failed" });
-    }
+ try {
+    // Scegli il topic giusto
+    const topic =
+      relayId === 2
+        ? process.env.MQTT_TOPIC_RELAY2
+        : process.env.MQTT_TOPIC_RELAY1;
+        
+    client.publish(topic, shellyPayload, { qos: 1 }, (err) => {
+      if (err) {
+        console.error("Errore invio comando a Shelly:", err);
+        return res.status(500).json({ success: false, error: "MQTT publish failed" });
+      }
 
-    logAction({
-      user: entry.user,
-      code: userCode,
-      action: `ACTIVATED RELAY ${relayId}`
+      logAction({ user: entry.user, code: userCode, action: `ACTIVATED_RELAY_${relayId}` });
+      res.json({ success: true, relayId, user: entry.user });
     });
-
-    res.json({ success: true, relayId, user: entry.user });
-  });
+  } catch (e) {
+    console.error("Eccezione durante publish:", e);
+    return res.status(500).json({ success: false, error: "Errore interno server" });
+  }
 });
 
 
