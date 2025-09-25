@@ -67,16 +67,23 @@ app.post("/verify-code", (req, res) => {
   res.json({ success: true, user: entry.user });
 });
 
-// --- Endpoint utente: invio comando al relè ---
+// --- Endpoint utente: invio comando a uno dei relè ---
 app.post("/send-command", (req, res) => {
-  const { userCode } = req.body;
+  const { userCode, relayId } = req.body; // relayId 1 o 2
   const entry = codes[userCode];
   const now = Date.now();
 
   if (!entry || now < entry.start || now > entry.expiry) {
     return res.status(400).json({ success: false, error: "Codice non valido o scaduto" });
   }
-    // 🔑 Payload richiesto da Shelly
+
+  // Scegli il topic giusto
+  const topic =
+    relayId === 2
+      ? process.env.MQTT_TOPIC_RELAY2
+      : process.env.MQTT_TOPIC_RELAY1;
+
+  // 🔑 Payload richiesto da Shelly
   const shellyPayload = JSON.stringify({
     id: 1,
     src: "webclient",
@@ -86,27 +93,23 @@ app.post("/send-command", (req, res) => {
       on: true
     }
   });
-  try {
-    client.publish("shelly-ingresso/rpc", shellyPayload, { qos: 1 }, (err) => {
-      if (err) {
-        console.error("Errore invio comando a Shelly:", err);
-        return res.status(500).json({ success: false, error: "MQTT publish failed" });
-      }
 
-      logAction({ user: entry.user, code: userCode, action: "ACTIVATED" });
+  client.publish(topic, shellyPayload, { qos: 1 }, (err) => {
+    if (err) {
+      console.error("Errore invio comando a Shelly:", err);
+      return res.status(500).json({ success: false, error: "MQTT publish failed" });
+    }
 
-      // 🔥 Risposta chiara e coerente per il frontend
-      return res.json({
-        success: true,
-        message: "Relè attivato",
-        user: entry.user
-      });
+    logAction({
+      user: entry.user,
+      code: userCode,
+      action: `ACTIVATED RELAY ${relayId}`
     });
-  } catch (e) {
-    console.error("Eccezione durante publish:", e);
-    return res.status(500).json({ success: false, error: "Errore interno server" });
-  }
+
+    res.json({ success: true, relayId, user: entry.user });
+  });
 });
+
 
 // --- Endpoint admin: crea codice ---
 app.post("/admin/create-code", (req, res) => {
