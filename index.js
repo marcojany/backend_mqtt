@@ -188,6 +188,39 @@ app.get("/admin/luce/status", (req, res) => {
   res.json({ success: true, isOn: luceStatus });
 });
 
+// aziona relay (admin) - generico per relay 1 e 2
+app.post("/admin/relay/:relayId", (req, res) => {
+  const relayId = parseInt(req.params.relayId);
+  
+  if (relayId !== 1 && relayId !== 2) {
+    return res.status(400).json({ success: false, error: "Relay ID non valido" });
+  }
+
+  const shellyPayload = JSON.stringify({
+    id: 1,
+    src: "webclient",
+    method: "Switch.Set",
+    params: {
+      id: 0,
+      on: true
+    }
+  });
+
+  const topic = relayId === 2 
+    ? process.env.MQTT_TOPIC_RELAY2 
+    : process.env.MQTT_TOPIC_RELAY1;
+
+  client.publish(topic, shellyPayload, { qos: 1 }, (err) => {
+    if (err) {
+      console.error(`❌ Errore apertura relay ${relayId}:`, err);
+      return res.status(500).json({ success: false, error: "MQTT publish failed" });
+    }
+    
+    console.log(`🔓 Comando apertura relay ${relayId} inviato (ADMIN)`);
+    res.json({ success: true, relayId });
+  });
+});
+
 // --- Endpoint admin: crea codice ---
 app.post("/admin/create-code", (req, res) => {
   const { user, startDate, expiryDate } = req.body;
