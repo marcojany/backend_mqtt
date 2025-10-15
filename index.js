@@ -11,9 +11,6 @@ import bodyParser from "body-parser";
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());  //! Abilita CORS per tutte le origini, modifica per limitare al dominio del frontend
-//app.use(cors({
-//  origin: "https://tuo-frontend.netlify.app"
-//}));
 
 // --- Connessione MQTT ---
 const client = mqtt.connect({
@@ -25,11 +22,41 @@ const client = mqtt.connect({
   rejectUnauthorized: false
 });
 
-client.on("connect", () => console.log("✅ Connesso a HiveMQ Cloud via MQTT"));
+client.on("connect", () => {
+  console.log("✅ Connesso a HiveMQ Cloud via MQTT");
+  
+  // Subscribe al topic di status della luce
+  client.subscribe(process.env.MQTT_TOPIC_LUCE_STATUS, (err) => {
+    if (err) {
+      console.error("❌ Errore subscribe MQTT_TOPIC_LUCE_STATUS:", err);
+    } else {
+      console.log("✅ Subscribed a", process.env.MQTT_TOPIC_LUCE_STATUS);
+    }
+  });
+});
 
-// --- Storage in memoria (puoi sostituire con DB PostgreSQL in futuro) ---
+// --- Storage in memoria ---
 let codes = {}; // { userCode: { user, expiry, expiresInSeconds } }
 let logs = [];  // array di { user, code, action, timestamp }
+let luceStatus = false; // Stato attuale della luce
+
+// --- Gestione messaggi MQTT in arrivo ---
+client.on("message", (topic, message) => {
+  try {
+    if (topic === process.env.MQTT_TOPIC_LUCE_STATUS) {
+      const payload = JSON.parse(message.toString());
+      
+      // Estrai lo stato da params.switch:0.output
+      if (payload.params && payload.params["switch:0"]) {
+        const newStatus = payload.params["switch:0"].output;
+        luceStatus = newStatus;
+        console.log(`💡 Stato luce aggiornato: ${newStatus ? "ACCESA" : "SPENTA"}`);
+      }
+    }
+  } catch (err) {
+    console.error("Errore parsing messaggio MQTT:", err);
+  }
+});
 
 // --- Helper log ---
 function logAction({ user, code, action }) {
@@ -69,7 +96,7 @@ app.post("/verify-code", (req, res) => {
 
 // --- Endpoint utente: invio comando a uno dei relè ---
 app.post("/send-command", (req, res) => {
-  const { userCode, relayId } = req.body; // relayId 1 o 2
+  const { userCode, relayId } = req.body;
   const entry = codes[userCode];
   const now = Date.now();
 
@@ -77,9 +104,6 @@ app.post("/send-command", (req, res) => {
     return res.status(400).json({ success: false, error: "Codice non valido o scaduto" });
   }
 
-  
-
-  // 🔑 Payload richiesto da Shelly
   const shellyPayload = JSON.stringify({
     id: 1,
     src: "webclient",
@@ -90,8 +114,7 @@ app.post("/send-command", (req, res) => {
     }
   });
 
- try {
-    // Scegli il topic giusto
+  try {
     const topic =
       relayId === 2
         ? process.env.MQTT_TOPIC_RELAY2
@@ -112,10 +135,62 @@ app.post("/send-command", (req, res) => {
   }
 });
 
+// --- NUOVI ENDPOINT ADMIN: Controllo luce ---
+
+// Accendi luce
+app.post("/admin/luce/on", (req, res) => {
+  const shellyPayload = JSON.stringify({
+    id: 1,
+    src: "webclient",
+    method: "Switch.Set",
+    params: {
+      id: 0,
+      on: true
+    }
+  });
+
+  client.publish(process.env.MQTT_TOPIC_LUCE, shellyPayload, { qos: 1 }, (err) => {
+    if (err) {
+      console.error("❌ Errore accensione luce:", err);
+      return res.status(500).json({ success: false, error: "MQTT publish failed" });
+    }
+    
+    console.log("💡 Comando ACCENSIONE luce inviato");
+    res.json({ success: true, action: "on" });
+  });
+});
+
+// Spegni luce
+app.post("/admin/luce/off", (req, res) => {
+  const shellyPayload = JSON.stringify({
+    id: 1,
+    src: "webclient",
+    method: "Switch.Set",
+    params: {
+      id: 0,
+      on: false
+    }
+  });
+
+  client.publish(process.env.MQTT_TOPIC_LUCE, shellyPayload, { qos: 1 }, (err) => {
+    if (err) {
+      console.error("❌ Errore spegnimento luce:", err);
+      return res.status(500).json({ success: false, error: "MQTT publish failed" });
+    }
+    
+    console.log("💡 Comando SPEGNIMENTO luce inviato");
+    res.json({ success: true, action: "off" });
+  });
+});
+
+// Ottieni stato luce
+app.get("/admin/luce/status", (req, res) => {
+  res.json({ success: true, isOn: luceStatus });
+});
 
 // --- Endpoint admin: crea codice ---
 app.post("/admin/create-code", (req, res) => {
-  const { user, startDate, expiryDate } = req.body; // ora riceviamo anche startDate
+  const { user, startDate, expiryDate } = req.body;
 
   try {
     const startUtc = DateTime.fromISO(startDate, { zone: 'Europe/Rome' }).toUTC().toMillis();
