@@ -13,7 +13,7 @@ import bodyParser from "body-parser";
 const app = express();
 app.use(bodyParser.json());
 app.use(cors({
-  origin: true,  //! Abilita CORS per tutte le origini, modifica per limitare al dominio del frontend
+  origin: process.env.FRONTEND_URL || true,  // URL del frontend (usa variabile d'ambiente in produzione)
   credentials: true  // Necessario per le sessioni
 }));
 
@@ -23,9 +23,10 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false,  // Imposta true se usi HTTPS
+    secure: process.env.NODE_ENV === 'production',  // true in produzione (HTTPS), false in locale
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000  // 24 ore
+    maxAge: 24 * 60 * 60 * 1000,  // 24 ore
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'  // 'none' necessario per CORS in produzione
   }
 }));
 
