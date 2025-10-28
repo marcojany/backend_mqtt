@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import mqtt from "mqtt";
 import { DateTime } from 'luxon';
+import session from "express-session";
+import bcrypt from "bcryptjs";
 //import dotenv from "dotenv"; //per uso locale utilizza il file .env
 import bodyParser from "body-parser";
 //dotenv.config();
@@ -10,7 +12,36 @@ import bodyParser from "body-parser";
 // --- Configurazione Express ---
 const app = express();
 app.use(bodyParser.json());
-app.use(cors());  //! Abilita CORS per tutte le origini, modifica per limitare al dominio del frontend
+app.use(cors({
+  origin: true,  //! Abilita CORS per tutte le origini, modifica per limitare al dominio del frontend
+  credentials: true  // Necessario per le sessioni
+}));
+
+// --- Configurazione Sessioni ---
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'change-this-secret-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: false,  // Imposta true se usi HTTPS
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000  // 24 ore
+  }
+}));
+
+// --- Credenziali Admin (in produzione usa variabili d'ambiente) ---
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+// Password di default: "admin123" (hash bcrypt)
+// Cambia la password usando: bcrypt.hashSync('tua_password', 10)
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || '$2a$10$8K1p/a0dL3.I9/XOd.BNReKmZPRKqBLmzGXdLQcCsqj8xR7H3RGqa';
+
+// --- Middleware di autenticazione ---
+const requireAuth = (req, res, next) => {
+  if (req.session && req.session.isAuthenticated) {
+    return next();
+  }
+  return res.status(401).json({ success: false, error: 'Non autenticato' });
+};
 
 // --- Connessione MQTT ---
 const client = mqtt.connect({
@@ -67,6 +98,51 @@ function logAction({ user, code, action }) {
     timestamp: Date.now()
   });
 }
+
+// --- ENDPOINT AUTENTICAZIONE ---
+
+// Login
+app.post("/admin/login", async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ success: false, error: "Username e password richiesti" });
+  }
+
+  if (username !== ADMIN_USERNAME) {
+    return res.status(401).json({ success: false, error: "Credenziali non valide" });
+  }
+
+  const isPasswordValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+
+  if (!isPasswordValid) {
+    return res.status(401).json({ success: false, error: "Credenziali non valide" });
+  }
+
+  // Imposta la sessione
+  req.session.isAuthenticated = true;
+  req.session.username = username;
+
+  res.json({ success: true, message: "Login effettuato con successo" });
+});
+
+// Logout
+app.post("/admin/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ success: false, error: "Errore durante il logout" });
+    }
+    res.json({ success: true, message: "Logout effettuato con successo" });
+  });
+});
+
+// Verifica sessione
+app.get("/admin/check-auth", (req, res) => {
+  if (req.session && req.session.isAuthenticated) {
+    return res.json({ success: true, isAuthenticated: true, username: req.session.username });
+  }
+  res.json({ success: false, isAuthenticated: false });
+});
 
 // --- Endpoint utente: verifica codice ---
 app.post("/verify-code", (req, res) => {
@@ -135,10 +211,10 @@ app.post("/send-command", (req, res) => {
   }
 });
 
-// --- NUOVI ENDPOINT ADMIN: Controllo luce ---
+// --- ENDPOINT ADMIN PROTETTI (richiedono autenticazione) ---
 
 // Accendi luce
-app.post("/admin/luce/on", (req, res) => {
+app.post("/admin/luce/on", requireAuth, (req, res) => {
   const shellyPayload = JSON.stringify({
     id: 1,
     src: "webclient",
@@ -161,7 +237,7 @@ app.post("/admin/luce/on", (req, res) => {
 });
 
 // Spegni luce
-app.post("/admin/luce/off", (req, res) => {
+app.post("/admin/luce/off", requireAuth, (req, res) => {
   const shellyPayload = JSON.stringify({
     id: 1,
     src: "webclient",
@@ -184,12 +260,12 @@ app.post("/admin/luce/off", (req, res) => {
 });
 
 // Ottieni stato luce
-app.get("/admin/luce/status", (req, res) => {
+app.get("/admin/luce/status", requireAuth, (req, res) => {
   res.json({ success: true, isOn: luceStatus });
 });
 
 // aziona relay (admin) - generico per relay 1 e 2
-app.post("/admin/relay/:relayId", (req, res) => {
+app.post("/admin/relay/:relayId", requireAuth, (req, res) => {
   const relayId = parseInt(req.params.relayId);
   
   if (relayId !== 1 && relayId !== 2) {
@@ -222,7 +298,7 @@ app.post("/admin/relay/:relayId", (req, res) => {
 });
 
 // --- Endpoint admin: crea codice ---
-app.post("/admin/create-code", (req, res) => {
+app.post("/admin/create-code", requireAuth, (req, res) => {
   const { user, startDate, expiryDate } = req.body;
 
   try {
@@ -258,7 +334,7 @@ app.post("/admin/create-code", (req, res) => {
 });
 
 // --- Endpoint admin: lista codici ---
-app.get("/admin/list-codes", (req, res) => {
+app.get("/admin/list-codes", requireAuth, (req, res) => {
   const activeCodes = Object.entries(codes).map(([code, entry]) => {
     const now = Date.now();
     const expiresInSeconds = Math.floor((entry.expiry - now) / 1000);
@@ -268,7 +344,7 @@ app.get("/admin/list-codes", (req, res) => {
 });
 
 // --- Endpoint admin: elimina codice ---
-app.delete("/admin/delete-code/:code", (req, res) => {
+app.delete("/admin/delete-code/:code", requireAuth, (req, res) => {
   const code = req.params.code;
   if (codes[code]) {
     const user = codes[code].user;
@@ -280,7 +356,7 @@ app.delete("/admin/delete-code/:code", (req, res) => {
 });
 
 // --- Endpoint admin: log ---
-app.get("/admin/logs", (req, res) => {
+app.get("/admin/logs", requireAuth, (req, res) => {
   res.json({ logs });
 });
 
