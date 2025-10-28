@@ -3,8 +3,8 @@ import express from "express";
 import cors from "cors";
 import mqtt from "mqtt";
 import { DateTime } from 'luxon';
-import session from "express-session";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 //import dotenv from "dotenv"; //per uso locale utilizza il file .env
 import bodyParser from "body-parser";
 //dotenv.config();
@@ -14,34 +14,36 @@ const app = express();
 app.use(bodyParser.json());
 app.use(cors({
   origin: process.env.FRONTEND_URL || true,  // URL del frontend (usa variabile d'ambiente in produzione)
-  credentials: true  // Necessario per le sessioni
+  credentials: true  // Necessario per inviare header Authorization
 }));
 
-// --- Configurazione Sessioni ---
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'change-this-secret-in-production',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',  // true in produzione (HTTPS), false in locale
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000,  // 24 ore
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'  // 'none' necessario per CORS in produzione
-  }
-}));
+// --- Configurazione JWT ---
+const JWT_SECRET = process.env.JWT_SECRET || 'd53d4652b4e0a9a0081eaf5311ce5c280a02726927b74b6ea2b3b37e67630879';
+const JWT_EXPIRES_IN = '24h';  // Token valido per 24 ore
 
 // --- Credenziali Admin (in produzione usa variabili d'ambiente) ---
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 // Password di default: "admin123" (hash bcrypt)
 // Cambia la password usando: bcrypt.hashSync('tua_password', 10)
-const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || '$2a$10$8K1p/a0dL3.I9/XOd.BNReKmZPRKqBLmzGXdLQcCsqj8xR7H3RGqa';
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || '$2b$10$u5prcWI4xm0CbKb8jYX3wuhZPOLj55wJcYVXNiE3duYIkpHTo2Zlu';
 
-// --- Middleware di autenticazione ---
+// --- Middleware di autenticazione JWT ---
 const requireAuth = (req, res, next) => {
-  if (req.session && req.session.isAuthenticated) {
-    return next();
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, error: 'Non autenticato - Token mancante' });
   }
-  return res.status(401).json({ success: false, error: 'Non autenticato' });
+
+  const token = authHeader.substring(7); // Rimuove "Bearer "
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // Salva i dati utente nella request
+    next();
+  } catch (err) {
+    return res.status(401).json({ success: false, error: 'Non autenticato - Token non valido' });
+  }
 };
 
 // --- Connessione MQTT ---
@@ -120,29 +122,33 @@ app.post("/admin/login", async (req, res) => {
     return res.status(401).json({ success: false, error: "Credenziali non valide" });
   }
 
-  // Imposta la sessione
-  req.session.isAuthenticated = true;
-  req.session.username = username;
+  // Genera JWT token
+  const token = jwt.sign(
+    { username: username },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
 
-  res.json({ success: true, message: "Login effettuato con successo" });
-});
-
-// Logout
-app.post("/admin/logout", (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      return res.status(500).json({ success: false, error: "Errore durante il logout" });
-    }
-    res.json({ success: true, message: "Logout effettuato con successo" });
+  res.json({
+    success: true,
+    message: "Login effettuato con successo",
+    token: token,
+    username: username
   });
 });
 
-// Verifica sessione
-app.get("/admin/check-auth", (req, res) => {
-  if (req.session && req.session.isAuthenticated) {
-    return res.json({ success: true, isAuthenticated: true, username: req.session.username });
-  }
-  res.json({ success: false, isAuthenticated: false });
+// Logout (lato client basta rimuovere il token, ma forniamo un endpoint per coerenza)
+app.post("/admin/logout", (req, res) => {
+  res.json({ success: true, message: "Logout effettuato con successo" });
+});
+
+// Verifica token
+app.get("/admin/check-auth", requireAuth, (req, res) => {
+  res.json({
+    success: true,
+    isAuthenticated: true,
+    username: req.user.username
+  });
 });
 
 // --- Endpoint utente: verifica codice ---
