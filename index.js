@@ -12,10 +12,11 @@ import bodyParser from "body-parser";
 // --- Configurazione Express ---
 const app = express();
 app.use(bodyParser.json());
-app.use(cors({
-  origin: process.env.FRONTEND_URL || true,  // URL del frontend (usa variabile d'ambiente in produzione)
-  credentials: true  // Necessario per inviare header Authorization
-}));
+app.use(cors({origin: true, credentials: true}));  //! Abilita CORS per tutte le origini, modifica per limitare al dominio del frontend
+//app.use(cors({
+//origin: process.env.FRONTEND_URL || true,  // URL del frontend (usa variabile d'ambiente in produzione)
+//credentials: true  // Necessario per inviare header Authorization
+//}));
 
 // --- Configurazione JWT ---
 const JWT_SECRET = process.env.JWT_SECRET || 'd53d4652b4e0a9a0081eaf5311ce5c280a02726927b74b6ea2b3b37e67630879';
