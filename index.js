@@ -80,10 +80,19 @@ client.on("message", (topic, message) => {
   try {
     if (topic === process.env.MQTT_TOPIC_LUCE_STATUS) {
       const payload = JSON.parse(message.toString());
-      
-      // Estrai lo stato da params.switch:0.output
+
+      let newStatus = null;
+
+      // Gestisce NotifyStatus (notifiche automatiche)
       if (payload.params && payload.params["switch:0"]) {
-        const newStatus = payload.params["switch:0"].output;
+        newStatus = payload.params["switch:0"].output;
+      }
+      // Gestisce risposta a Switch.GetStatus
+      else if (payload.result && payload.result.output !== undefined) {
+        newStatus = payload.result.output;
+      }
+
+      if (newStatus !== null) {
         luceStatus = newStatus;
         console.log(`💡 Stato luce aggiornato: ${newStatus ? "ACCESA" : "SPENTA"}`);
       }
@@ -270,6 +279,26 @@ app.post("/admin/luce/off", requireAuth, (req, res) => {
 // Ottieni stato luce
 app.get("/admin/luce/status", requireAuth, (req, res) => {
   res.json({ success: true, isOn: luceStatus });
+});
+
+// Sollecita status luce dallo Shelly
+app.post("/admin/luce/request-status", requireAuth, (req, res) => {
+  const shellyPayload = JSON.stringify({
+    id: 1,
+    src: "relay_luce/events",
+    method: "Switch.GetStatus",
+    params: { id: 0 }
+  });
+
+  client.publish(process.env.MQTT_TOPIC_LUCE, shellyPayload, { qos: 1 }, (err) => {
+    if (err) {
+      console.error("❌ Errore richiesta status luce:", err);
+      return res.status(500).json({ success: false, error: "MQTT publish failed" });
+    }
+
+    console.log("📡 Richiesta status luce inviata");
+    res.json({ success: true, message: "Status request sent" });
+  });
 });
 
 // aziona relay (admin) - generico per relay 1 e 2
