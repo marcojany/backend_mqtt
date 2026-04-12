@@ -75,6 +75,35 @@ let codes = {}; // { userCode: { user, expiry, expiresInSeconds } }
 let logs = [];  // array di { user, code, action, timestamp }
 let luceStatus = false; // Stato attuale della luce
 
+// --- Helpers Upstash Redis ---
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+async function redisCmd(...args) {
+  if (!REDIS_URL || !REDIS_TOKEN) return null;
+  const res = await fetch(`${REDIS_URL}/${args.map(encodeURIComponent).join('/')}`, {
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
+  });
+  const json = await res.json();
+  return json.result ?? null;
+}
+
+async function loadFromRedis() {
+  const keys = await redisCmd('keys', 'code:*') ?? [];
+  for (const key of keys) {
+    const raw = await redisCmd('get', key);
+    if (!raw) continue;
+    const entry = JSON.parse(raw);
+    if (entry.expiry > Date.now()) {
+      codes[key.replace('code:', '')] = entry;
+    }
+  }
+  const rawLogs = await redisCmd('lrange', 'logs', '0', '-1') ?? [];
+  logs = rawLogs.map(r => JSON.parse(r));
+  console.log(`✅ Redis: ${Object.keys(codes).length} codici, ${logs.length} log caricati`);
+}
+loadFromRedis().catch(err => console.error('❌ Errore caricamento Redis:', err));
+
 // --- Gestione messaggi MQTT in arrivo ---
 client.on("message", (topic, message) => {
   try {
@@ -104,12 +133,11 @@ client.on("message", (topic, message) => {
 
 // --- Helper log ---
 function logAction({ user, code, action }) {
-  logs.push({
-    user: user || "-",
-    code: code || "-",
-    action,
-    timestamp: Date.now()
-  });
+  const entry = { user: user || "-", code: code || "-", action, timestamp: Date.now() };
+  logs.push(entry);
+  redisCmd('rpush', 'logs', JSON.stringify(entry))
+    .then(() => redisCmd('ltrim', 'logs', '-1000', '-1'))
+    .catch(() => {});
 }
 
 // --- ENDPOINT AUTENTICAZIONE ---
@@ -351,9 +379,12 @@ app.post("/admin/create-code", requireAuth, (req, res) => {
     }
 
     const code = Math.floor(10000 + Math.random() * 90000).toString();
-    const secondsRemaining = Math.floor((expiryUtc - Date.now()) / 1000);
 
-    codes[code] = { user, start: startUtc, expiry: expiryUtc, expiresInSeconds: secondsRemaining };
+    codes[code] = { user, start: startUtc, expiry: expiryUtc };
+
+    const ttl = Math.max(1, Math.floor((expiryUtc - Date.now()) / 1000));
+    redisCmd('set', `code:${code}`, JSON.stringify({ user, start: startUtc, expiry: expiryUtc }), 'EX', String(ttl))
+      .catch(err => console.error('❌ Redis set error:', err));
 
     logAction({ user, code, action: "CREATED" });
 
@@ -386,6 +417,7 @@ app.delete("/admin/delete-code/:code", requireAuth, (req, res) => {
   if (codes[code]) {
     const user = codes[code].user;
     delete codes[code];
+    redisCmd('del', `code:${code}`).catch(() => {});
     logAction({ user, code, action: "DELETED" });
     return res.json({ success: true });
   }
@@ -404,6 +436,7 @@ setInterval(() => {
     if (entry.expiry <= now) {
       logAction({ user: entry.user, code, action: "EXPIRED" });
       delete codes[code];
+      redisCmd('del', `code:${code}`).catch(() => {});
       console.log(`Codice ${code} di ${entry.user} è scaduto e rimosso.`);
     } else {
       entry.expiresInSeconds = Math.floor((entry.expiry - now) / 1000);
