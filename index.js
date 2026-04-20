@@ -96,6 +96,8 @@ async function loadFromRedis() {
     const entry = JSON.parse(raw);
     if (entry.expiry > Date.now()) {
       codes[key.replace('code:', '')] = entry;
+    } else {
+      logAction({ user: entry.user, code: key.replace('code:', ''), action: "EXPIRED" });
     }
   }
   const rawLogs = await redisCmd('lrange', 'logs', '0', '-1') ?? [];
